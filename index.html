@@ -21,9 +21,12 @@
   #hud .section-title { color: #6cf; font-size: 16px; text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 8px; }
   #hud .row { display: flex; justify-content: space-between; align-items: baseline; margin: 4px 0; }
   #hud .lbl { color: #778; font-size: 16px; white-space: nowrap; flex-shrink: 0; }
-  #hud .val { color: #ddd; font-size: 17px; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  #hud .val { color: #ddd; font-size: 17px; text-align: right; font-variant-numeric: tabular-nums; }
   #hud .val.big { color: #6f6; font-size: 22px; font-weight: bold; }
   #hud .val.med { color: #fff; font-size: 19px; }
+  #hud .val.sm { color: #777; font-size: 14px; }
+  #hud .val.evt { color: #ddd; font-size: 15px; overflow: visible;}
+  #hud .val.evt-time { color: #fc6; font-size: 17px; font-variant-numeric: tabular-nums; }
   #hud .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 16px; }
   #hud .cols .lbl { font-size: 14px; }
   #hud .cols .val { font-size: 16px; text-align: left; }
@@ -85,20 +88,34 @@
 <div id="hud">
   <h1>ARTEMIS II — ORION</h1>
 
-  <div class="row"><span class="lbl">Mission Phase</span><span class="val med" id="phase">—</span></div>
   <div class="row"><span class="lbl">Mission Elapsed Time</span><span class="val med" id="met">—</span></div>
+
+  <div class="section">
+    <div class="section-title">Mission Phase</div>
+    <div class="row"><span class="lbl">Phase</span><span class="val evt" id="phase">—</span></div>
+    <div class="row"><span class="lbl">Last Event</span><span class="val evt" id="last-event-name" title="">—</span></div>
+    <div class="row"><span class="lbl">Time Since</span><span class="val evt-time" id="last-event-elapsed">—</span></div>
+    <br>
+    <div class="row"><span class="lbl">Next Event</span><span class="val evt" id="next-event-name" title="">—</span></div>
+    <div class="row"><span class="lbl">Event Countdown</span><span class="val evt-time" id="next-event-countdown">—</span></div>
+  </div>
 
   <div class="section">
     <div class="section-title">Distance</div>
     <div class="row"><span class="lbl">From Earth (center)</span><span class="val big" id="dist-earth">—</span></div>
-    <div class="row"><span class="lbl">Altitude (surface)</span><span class="val med" id="alt-earth">—</span></div>
+    <div class="row"><span class="lbl"></span><span class="val sm" id="dist-earth-mi">—</span></div>
+    <div class="row"><span class="lbl">Altitude above Earth</span><span class="val med" id="alt-earth">—</span></div>
+    <div class="row"><span class="lbl"></span><span class="val sm" id="alt-earth-mi">—</span></div>
     <div class="row"><span class="lbl">From Moon (center)</span><span class="val big" id="dist-moon">—</span></div>
+    <div class="row"><span class="lbl"></span><span class="val sm" id="dist-moon-mi">—</span></div>
     <div class="row"><span class="lbl">Altitude above Moon</span><span class="val med" id="alt-moon">—</span></div>
+    <div class="row"><span class="lbl"></span><span class="val sm" id="alt-moon-mi">—</span></div>
   </div>
 
   <div class="section">
     <div class="section-title">Velocity</div>
     <div class="row"><span class="lbl">Speed</span><span class="val med" id="speed">—</span></div>
+    <div class="row"><span class="lbl"></span><span class="val sm" id="speed-ph">—</span></div>
     <div class="row"><span class="lbl">Radial (toward/away Earth)</span><span class="val" id="radial-v">—</span></div>
     <div class="row"><span class="lbl">Horizontal</span><span class="val" id="horiz-v">—</span></div>
     <div class="row"><span class="lbl">Flight Path Angle</span><span class="val" id="fpa">—</span></div>
@@ -199,6 +216,7 @@ import { ORION_ELEMENTS } from './data/orion_elements.js';
 const SCALE = 1 / 1000;  // 1 unit = 1000 km
 const EARTH_RADIUS = 6371 * SCALE;
 const MOON_RADIUS = 1737 * SCALE;
+const LAUNCH_JD = 2461132.441111; // Apr 1, 2026 22:35:12 UTC
 
 // ── Parse pre-fetched data ──
 // Vectors: [jd, dateStr, x, y, z, vx, vy, vz, range, rangeRate]
@@ -538,19 +556,111 @@ function toScene(pt) {
   return new THREE.Vector3(pt.x * SCALE, pt.z * SCALE, -pt.y * SCALE);
 }
 
+// ── Mission event timeline (source: NASA Artemis II Press Kit + JPL Horizons) ──
+// Each offset is seconds after launch (April 1, 2026 22:35:12 UTC).
+// Press kit: nasa.gov/artemis-ii-press-kit  —  shadow events from JPL data.
+const MISSION_EVENTS = [
+  // ── Ascent (Flight Day 1) ──
+  { t:        0, name: 'Launch',                                   phase: 'Launch / Ascent' },
+  { t:        9, name: 'SLS clears tower, roll/pitch maneuver',    phase: 'Launch / Ascent' },
+  { t:       56, name: 'SLS reaches supersonic speed',             phase: 'Launch / Ascent' },
+  { t:       70, name: 'Maximum dynamic pressure (Max-Q)',         phase: 'Launch / Ascent' },
+  { t:      128, name: 'Solid rocket booster separation',          phase: 'Launch / Ascent' },
+  { t:      198, name: 'Launch abort system jettison',             phase: 'Launch / Ascent' },
+  { t:      486, name: 'Core stage main engine cutoff',            phase: 'Launch / Ascent' },
+  { t:      498, name: 'Core stage separates from ICPS',           phase: 'Earth Orbit / Checkout' },
+  { t:      508, name: 'ICPS RL10 nozzle extension',               phase: 'Earth Orbit / Checkout' },
+  { t:     1200, name: 'Orion deploys solar arrays',               phase: 'Earth Orbit / Checkout' },
+  { t:     2940, name: 'Perigee raise maneuver',                   phase: 'Earth Orbit / Perigee Raise' },
+  { t:     6477, name: 'Apogee raise burn',                        phase: 'Earth Orbit / Apogee Raise' },
+  { t:    12255, name: 'Orion separates from ICPS',                phase: 'Post-Separation / Checkout' },
+  { t:    16500, name: 'Proximity operations conclude',            phase: 'Post-Separation / Checkout' },
+  { t:    17520, name: 'Orion upper stage separation burn',        phase: 'Post-Separation / Checkout' },
+  { t:    18000, name: 'ICPS disposal burn',                       phase: 'Post-Separation / Checkout' },
+  { t:    18240, name: 'CubeSat deployment begins',                phase: 'Post-Separation / Checkout' },
+  { t:    49440, name: 'Perigee raise burn',                       phase: 'Earth Orbit / Perigee Raise' },
+  // ── Flight Day 2 ──
+  { t:    92220, name: 'Translunar injection burn (~8 min)',        phase: 'Translunar Injection' },
+  { t:    92100, name: 'Earth shadow entrance',                    phase: 'Translunar Coast' },
+  { t:    96060, name: 'Earth shadow exit',                        phase: 'Translunar Coast' },
+  { t:   170700, name: 'Orbital trajectory correction burn',       phase: 'Translunar Coast' },
+  // ── Flight Day 3 ──
+  { t:   173220, name: 'Trajectory correction burn #1',            phase: 'Translunar Coast' },
+  { t:   180300, name: 'Crew CPR demonstration',                   phase: 'Translunar Coast' },
+  { t:   192300, name: 'Deep Space Network comms test',            phase: 'Translunar Coast' },
+  // ── Flight Day 4 ──
+  { t:   262320, name: 'Trajectory correction burn #2',            phase: 'Translunar Coast' },
+  { t:   274800, name: 'Lunar flyby imaging review (shift 1)',     phase: 'Translunar Coast' },
+  { t:   282300, name: 'Lunar flyby imaging review (shift 2)',     phase: 'Translunar Coast' },
+  // ── Flight Day 5 ──
+  { t:   335400, name: 'Rapid spacesuit don & pressurization demo', phase: 'Translunar Coast' },
+  { t:   361380, name: 'Trajectory correction burn #3',            phase: 'Translunar Coast' },
+  { t:   367140, name: 'Enter lunar sphere of influence',          phase: 'Lunar Sphere of Influence' },
+  // ── Flight Day 6 ──
+  { t:   421200, name: 'Lunar flyby observation begins',           phase: 'Lunar Sphere of Influence' },
+  { t:   434580, name: 'Closest approach to the Moon',             phase: 'Closest Lunar Approach' },
+  { t:   434760, name: 'Maximum distance from Earth',              phase: 'Closest Lunar Approach' },
+  // ── Flight Day 7 ──
+  { t:   500820, name: 'Exit lunar sphere of influence',           phase: 'Powered Flyby / Free Return' },
+  { t:   505800, name: 'Lunar flyby science debrief',              phase: 'Return Transit' },
+  { t:   534180, name: 'Return trajectory correction #1',          phase: 'Return Transit' },
+  // ── Flight Day 8 ──
+  { t:   612600, name: 'Radiation shielding demonstration',        phase: 'Return Transit' },
+  { t:   620400, name: 'Manual piloting demonstration',            phase: 'Return Transit' },
+  // ── Flight Day 9 ──
+  { t:   688500, name: 'Orthostatic garment assessment (shift 1)', phase: 'Return Transit' },
+  { t:   699000, name: 'Orthostatic garment assessment (shift 2)', phase: 'Return Transit' },
+  { t:   707580, name: 'Return trajectory correction #2',          phase: 'Return Transit' },
+  // ── Flight Day 10 ──
+  { t:   765180, name: 'Return trajectory correction #3',          phase: 'Entry & Splashdown Approach' },
+  { t:   772200, name: 'Entry checklist begins, suits donned',     phase: 'Entry & Splashdown Approach' },
+  { t:   782580, name: 'Crew & service module separation',         phase: 'Entry & Splashdown Approach' },
+  { t:   782760, name: 'Crew module raise burn',                   phase: 'Entry & Splashdown Approach' },
+  { t:   783780, name: 'Entry interface (400,000 ft)',             phase: 'Entry & Splashdown Approach' },
+  { t:   784560, name: 'Splashdown in Pacific Ocean',              phase: 'Splashdown' },
+  { t:   784980, name: 'RCS safing',                               phase: 'Post-Splashdown' },
+  { t:   785460, name: 'Orion final power down',                   phase: 'Mission Complete' },
+];
+
+// Sort by time (ascent events are already ordered, but be safe)
+MISSION_EVENTS.sort((a, b) => a.t - b.t);
+
 function getMissionPhase(jd) {
-  // Approximate mission phases based on known timeline
-  const h = (jd - 2461132.583) * 24; // hours since data start
-  if (h < 1.5) return 'Post-Separation / Checkout';
-  if (h < 11) return 'Earth Orbit / Perigee Raise';
-  if (h < 25) return 'Translunar Injection Prep';
-  if (h < 30) return 'Translunar Injection Burn';
-  if (h < 96) return 'Translunar Coast';
-  if (h < 105) return 'Lunar Sphere of Influence';
-  if (h < 115) return 'Closest Lunar Approach';
-  if (h < 130) return 'Powered Flyby / Free Return';
-  if (h < 200) return 'Return Transit';
-  return 'Entry & Splashdown Approach';
+  const metSec = (jd - LAUNCH_JD) * 86400;
+  if (metSec < 0) return 'Pre-Launch';
+  for (let i = MISSION_EVENTS.length - 1; i >= 0; i--) {
+    if (metSec >= MISSION_EVENTS[i].t) return MISSION_EVENTS[i].phase;
+  }
+  return 'Pre-Launch';
+}
+
+// Returns { name, elapsed } for the most recently passed event, or null pre-launch.
+function getLastEvent(metSec) {
+  for (let i = MISSION_EVENTS.length - 1; i >= 0; i--) {
+    if (metSec >= MISSION_EVENTS[i].t) {
+      return { name: MISSION_EVENTS[i].name, elapsed: metSec - MISSION_EVENTS[i].t };
+    }
+  }
+  return null;
+}
+
+// Returns { name, countdown } for the next upcoming event, or null if mission is complete.
+function getNextEvent(metSec) {
+  for (let i = 0; i < MISSION_EVENTS.length; i++) {
+    if (MISSION_EVENTS[i].t > metSec) {
+      return { name: MISSION_EVENTS[i].name, countdown: MISSION_EVENTS[i].t - metSec };
+    }
+  }
+  return null;
+}
+
+function formatCountdown(sec) {
+  const d = Math.floor(sec / 86400);
+  const h = Math.floor((sec % 86400) / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = Math.floor(sec % 60);
+  if (d > 0) return `${d}d ${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
 }
 
 function formatNum(n, dec = 1) {
@@ -753,7 +863,6 @@ function updateScene(fracIdx) {
   const gForce = accelMs2 / 9.80665;
 
   // Mission Elapsed Time
-  const LAUNCH_JD = 2461132.416; // approx launch JD (Apr 1, 2026 ~22:00 UTC)
   const metSec = Math.max(0, (pt.jd - LAUNCH_JD) * 86400);
   const metD = Math.floor(metSec / 86400);
   const metH = Math.floor((metSec % 86400) / 3600);
@@ -762,17 +871,51 @@ function updateScene(fracIdx) {
   const metStr = `T+${metD}d ${String(metH).padStart(2,'0')}:${String(metM).padStart(2,'0')}:${String(metS).padStart(2,'0')}`;
 
   // ── HUD ──
-  document.getElementById('phase').textContent = getMissionPhase(pt.jd);
   document.getElementById('met').textContent = metStr;
+  document.getElementById('phase').textContent = getMissionPhase(pt.jd);
+
+  // Last event
+  const lastEvt = getLastEvent(metSec);
+  const lastNameEl = document.getElementById('last-event-name');
+  if (lastEvt) {
+    lastNameEl.textContent = lastEvt.name;
+    lastNameEl.title = lastEvt.name; // tooltip for truncated text
+    document.getElementById('last-event-elapsed').textContent = 'T+' + formatCountdown(lastEvt.elapsed);
+  } else {
+    lastNameEl.textContent = 'Awaiting launch';
+    lastNameEl.title = '';
+    document.getElementById('last-event-elapsed').textContent = '—';
+  }
+
+  // Next event
+  const nextEvt = getNextEvent(metSec);
+  const nextNameEl = document.getElementById('next-event-name');
+  if (nextEvt) {
+    nextNameEl.textContent = nextEvt.name;
+    nextNameEl.title = nextEvt.name; // tooltip for truncated text
+    document.getElementById('next-event-countdown').textContent = 'T\u2212' + formatCountdown(nextEvt.countdown);
+  } else {
+    nextNameEl.textContent = 'Mission Complete';
+    nextNameEl.title = '';
+    document.getElementById('next-event-countdown').textContent = '—';
+  }
 
   // Distance
   document.getElementById('dist-earth').textContent = formatNum(pt.rg) + ' km';
-  document.getElementById('alt-earth').textContent = formatNum(altEarth) + ' km  (' + formatNum(altEarth / 1.609) + ' mi)';
+  document.getElementById('dist-earth-mi').textContent = '(' + formatNum(pt.rg/ 1.609) + ' mi)';
+
+  document.getElementById('alt-earth').textContent = formatNum(altEarth) + ' km';
+  document.getElementById('alt-earth-mi').textContent = '(' +formatNum(altEarth / 1.609) + ' mi)';
+
   document.getElementById('dist-moon').textContent = formatNum(distMoon) + ' km';
-  document.getElementById('alt-moon').textContent = formatNum(altMoon) + ' km  (' + formatNum(altMoon / 1.609) + ' mi)';
+  document.getElementById('dist-moon-mi').textContent = '(' + formatNum(distMoon/ 1.609) + ' mi)';
+
+  document.getElementById('alt-moon').textContent = formatNum(altMoon) + ' km';
+  document.getElementById('alt-moon-mi').textContent = '(' + formatNum(altMoon / 1.609) + ' mi)';
 
   // Velocity
-  document.getElementById('speed').textContent = `${formatNum(speed, 3)} km/s  (${formatNum(speed * 3600, 1)} km/h)`;
+  document.getElementById('speed').textContent = `${formatNum(speed, 3)} km/s`;
+  document.getElementById('speed-ph').textContent = `(${formatNum(speed * 3600, 1)} km/h)`;
   document.getElementById('radial-v').textContent = `${radialV >= 0 ? '+' : ''}${formatNum(radialV, 3)} km/s  ${radialV > 0 ? '↑ away' : '↓ toward'}`;
   document.getElementById('horiz-v').textContent = formatNum(horizV, 3) + ' km/s';
 
