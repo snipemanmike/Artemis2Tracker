@@ -5,6 +5,7 @@ import json
 import math
 import os
 import urllib.request
+import urllib.parse
 
 HORIZONS_API = 'https://ssd.jpl.nasa.gov/api/horizons.api'
 MISSION_START = '2026-04-02 02:00'
@@ -30,12 +31,12 @@ def fetch_horizons(command, ephem_type, extra_params=None):
     if extra_params:
         params.update(extra_params)
 
-    query = '&'.join(f'{k}={v}' for k, v in params.items())
+    query = '&'.join(f'{k}={urllib.parse.quote(str(v), safe="'@")}' for k, v in params.items())
     url = f'{HORIZONS_API}?{query}'
     print(f'  Fetching: {command} {ephem_type}...')
 
     req = urllib.request.Request(url)
-    with urllib.request.urlopen(req, timeout=30) as resp:
+    with urllib.request.urlopen(req, timeout=60) as resp:
         data = json.loads(resp.read().decode())
 
     return data['result']
