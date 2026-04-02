@@ -31,7 +31,8 @@ def fetch_horizons(command, ephem_type, extra_params=None):
     if extra_params:
         params.update(extra_params)
 
-    query = '&'.join(f'{k}={urllib.parse.quote(str(v), safe="'@")}' for k, v in params.items())
+    safe_chars = "'@"
+    query = '&'.join(f'{k}={urllib.parse.quote(str(v), safe=safe_chars)}' for k, v in params.items())
     url = f'{HORIZONS_API}?{query}'
     print(f'  Fetching: {command} {ephem_type}...')
 
