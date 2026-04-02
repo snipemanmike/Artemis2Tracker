@@ -1,0 +1,1068 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Artemis II Live Tracker</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #000; color: #fff; font-family: 'Consolas', 'Monaco', monospace; overflow: hidden; }
+  #canvas-container { width: 100vw; height: 100vh; }
+  canvas { display: block; }
+
+  #hud {
+    position: absolute; top: 20px; left: 20px;
+    background: rgba(0,0,0,0.8); border: 1px solid #334; border-radius: 8px;
+    padding: 20px 24px; width: 504px; pointer-events: none;
+    max-height: calc(100vh - 140px); overflow-y: auto;
+  }
+  #hud h1 { font-size: 22px; color: #6cf; margin-bottom: 12px; letter-spacing: 1px; }
+  #hud .section { margin-top: 12px; padding-top: 10px; border-top: 1px solid #223; }
+  #hud .section-title { color: #6cf; font-size: 16px; text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 8px; }
+  #hud .row { display: flex; justify-content: space-between; align-items: baseline; margin: 4px 0; }
+  #hud .lbl { color: #778; font-size: 16px; white-space: nowrap; flex-shrink: 0; }
+  #hud .val { color: #ddd; font-size: 17px; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  #hud .val.big { color: #6f6; font-size: 22px; font-weight: bold; }
+  #hud .val.med { color: #fff; font-size: 19px; }
+  #hud .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 16px; }
+  #hud .cols .lbl { font-size: 14px; }
+  #hud .cols .val { font-size: 16px; text-align: left; }
+
+  #status-bar {
+    position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+    background: rgba(0,0,0,0.75); border: 1px solid #334; border-radius: 8px;
+    padding: 10px 20px; font-size: 12px; color: #889; text-align: center;
+    pointer-events: none;
+  }
+  #status-bar .live { color: #f44; }
+
+  #controls {
+    position: absolute; top: 20px; right: 20px;
+    background: rgba(0,0,0,0.75); border: 1px solid #334; border-radius: 8px;
+    padding: 16px 20px; pointer-events: auto;
+  }
+  #controls button {
+    display: block; width: 100%; margin: 4px 0; padding: 6px 12px;
+    background: #222; border: 1px solid #445; border-radius: 4px;
+    color: #ccc; font-family: inherit; font-size: 12px; cursor: pointer;
+  }
+  #controls button:hover { background: #335; border-color: #66f; }
+  #controls button.active { background: #246; border-color: #6cf; color: #fff; }
+
+  #time-slider-container {
+    position: absolute; bottom: 60px; left: 50%; transform: translateX(-50%);
+    width: 60%; background: rgba(0,0,0,0.75); border: 1px solid #334; border-radius: 8px;
+    padding: 12px 20px; pointer-events: auto;
+  }
+  #time-slider { width: 100%; cursor: pointer; }
+  #time-label { text-align: center; font-size: 12px; color: #aaa; margin-top: 4px; }
+
+  .warp-btn {
+    padding: 3px 8px; background: #222; border: 1px solid #445; border-radius: 3px;
+    color: #888; font-family: inherit; font-size: 11px; cursor: pointer;
+  }
+  .warp-btn:hover { background: #335; border-color: #66f; color: #ccc; }
+  .warp-btn.active { background: #246; border-color: #6cf; color: #fff; }
+
+  .loading-overlay {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: #000; display: flex; align-items: center; justify-content: center;
+    flex-direction: column; z-index: 999;
+  }
+  .loading-overlay h2 { color: #6cf; margin-bottom: 10px; }
+  .loading-overlay p { color: #889; font-size: 14px; }
+</style>
+</head>
+<body>
+
+<div id="loading" class="loading-overlay">
+  <h2>ARTEMIS II TRACKER</h2>
+  <p id="load-status">Loading trajectory data...</p>
+</div>
+
+<div id="canvas-container"></div>
+
+<div id="hud">
+  <h1>ARTEMIS II — ORION</h1>
+
+  <div class="row"><span class="lbl">Mission Phase</span><span class="val med" id="phase">—</span></div>
+  <div class="row"><span class="lbl">Mission Elapsed Time</span><span class="val med" id="met">—</span></div>
+
+  <div class="section">
+    <div class="section-title">Distance</div>
+    <div class="row"><span class="lbl">From Earth (center)</span><span class="val big" id="dist-earth">—</span></div>
+    <div class="row"><span class="lbl">Altitude (surface)</span><span class="val med" id="alt-earth">—</span></div>
+    <div class="row"><span class="lbl">From Moon (center)</span><span class="val big" id="dist-moon">—</span></div>
+    <div class="row"><span class="lbl">Altitude above Moon</span><span class="val med" id="alt-moon">—</span></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Velocity</div>
+    <div class="row"><span class="lbl">Speed</span><span class="val med" id="speed">—</span></div>
+    <div class="row"><span class="lbl">Radial (toward/away Earth)</span><span class="val" id="radial-v">—</span></div>
+    <div class="row"><span class="lbl">Horizontal</span><span class="val" id="horiz-v">—</span></div>
+    <div class="row"><span class="lbl">Flight Path Angle</span><span class="val" id="fpa">—</span></div>
+    <div class="row"><span class="lbl">Acceleration</span><span class="val" id="accel">—</span></div>
+    <div class="row"><span class="lbl">G-force</span><span class="val" id="gforce">—</span></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Orbital Elements (Earth)</div>
+    <div class="cols">
+      <span class="lbl">Semi-major axis</span><span class="val" id="el-sma">—</span>
+      <span class="lbl">Eccentricity</span><span class="val" id="el-ecc">—</span>
+      <span class="lbl">Inclination</span><span class="val" id="el-inc">—</span>
+      <span class="lbl">RAAN (Ω)</span><span class="val" id="el-raan">—</span>
+      <span class="lbl">Arg. Periapsis (ω)</span><span class="val" id="el-argp">—</span>
+      <span class="lbl">True Anomaly (ν)</span><span class="val" id="el-ta">—</span>
+      <span class="lbl">Perigee Alt.</span><span class="val" id="el-peri">—</span>
+      <span class="lbl">Apogee Alt.</span><span class="val" id="el-apo">—</span>
+      <span class="lbl">Orbital Period</span><span class="val" id="el-period">—</span>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Position (ICRF J2000)</div>
+    <div class="cols">
+      <span class="lbl">X</span><span class="val" id="pos-x">—</span>
+      <span class="lbl">Y</span><span class="val" id="pos-y">—</span>
+      <span class="lbl">Z</span><span class="val" id="pos-z">—</span>
+      <span class="lbl">VX</span><span class="val" id="vel-x">—</span>
+      <span class="lbl">VY</span><span class="val" id="vel-y">—</span>
+      <span class="lbl">VZ</span><span class="val" id="vel-z">—</span>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Crew</div>
+    <div class="cols" style="grid-template-columns: 1fr;">
+      <span class="val" style="color:#aaa;">CDR Reid Wiseman</span>
+      <span class="val" style="color:#aaa;">PLT Victor Glover</span>
+      <span class="val" style="color:#aaa;">MS1 Christina Koch</span>
+      <span class="val" style="color:#aaa;">MS2 Jeremy Hansen (CSA)</span>
+    </div>
+  </div>
+</div>
+
+<div id="controls">
+  <button id="btn-earth" onclick="focusOn('earth')">Focus Earth</button>
+  <button id="btn-moon" onclick="focusOn('moon')">Focus Moon</button>
+  <button id="btn-orion" onclick="focusOn('orion')" class="active">Focus Orion</button>
+  <button id="btn-overview" onclick="focusOn('overview')">Full Overview</button>
+  <button id="btn-play" onclick="togglePlayback()">▶ Play</button>
+  <div style="border-top:1px solid #334; margin:6px 0;"></div>
+  <button id="btn-nasatv" onclick="toggleNasaTV()">Mission Audio: OFF</button>
+  <div id="volume-row" style="display:none; margin-top:4px;">
+    <input type="range" id="vol-slider" min="0" max="100" value="50" style="width:100%;">
+  </div>
+</div>
+
+<div id="time-slider-container">
+  <div id="warp-controls" style="display:flex; align-items:center; justify-content:center; gap:6px; margin-bottom:6px;">
+    <button class="warp-btn" onclick="setWarp(1)" id="warp-1">1x</button>
+    <button class="warp-btn" onclick="setWarp(10)">10x</button>
+    <button class="warp-btn" onclick="setWarp(60)">60x</button>
+    <button class="warp-btn" onclick="setWarp(600)">600x</button>
+    <button class="warp-btn" onclick="setWarp(3600)">3600x</button>
+    <span id="warp-label" style="color:#6cf; font-size:11px; margin-left:6px;">TIME WARP: 1x</span>
+  </div>
+  <div style="display:flex; align-items:center; gap:10px;">
+    <button id="btn-live" onclick="goLive()" style="padding:4px 14px; background:#611; border:1px solid #f44; border-radius:4px; color:#f44; font-family:inherit; font-size:12px; font-weight:bold; cursor:pointer; white-space:nowrap;">● LIVE</button>
+    <input type="range" id="time-slider" min="0" max="10000" value="10000" style="flex:1;">
+  </div>
+  <div id="time-label">—</div>
+</div>
+
+<div id="status-bar">
+  <span class="live">● LIVE</span> &nbsp; Data: JPL Horizons (ssd.jpl.nasa.gov) &nbsp;|&nbsp; Spacecraft ID: -1024 &nbsp;|&nbsp; Scroll to zoom, drag to rotate
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.162.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.162.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { ORION_VECTORS } from './data/orion_vectors.js';
+import { MOON_VECTORS } from './data/moon_vectors.js';
+import { ORION_ELEMENTS } from './data/orion_elements.js';
+
+// ── Constants ──
+const SCALE = 1 / 1000;  // 1 unit = 1000 km
+const EARTH_RADIUS = 6371 * SCALE;
+const MOON_RADIUS = 1737 * SCALE;
+
+// ── Parse pre-fetched data ──
+// Vectors: [jd, dateStr, x, y, z, vx, vy, vz, range, rangeRate]
+function unpackVectors(arr) {
+  return arr.map(r => ({
+    jd: r[0], dateStr: r[1],
+    x: r[2], y: r[3], z: r[4],
+    vx: r[5], vy: r[6], vz: r[7],
+    rg: r[8], rr: r[9]
+  }));
+}
+// Elements: [jd, ecc, periapsis, incl, raan, argPeri, trueAnom, sma, apoapsis, period]
+function unpackElements(arr) {
+  return arr.map(r => ({
+    jd: r[0], ec: r[1], qr: r[2], inc: r[3],
+    om: r[4], w: r[5], ta: r[6],
+    a: r[7], ad: r[8], pr: r[9]
+  }));
+}
+
+const setStatus = (msg) => { document.getElementById('load-status').textContent = msg; };
+setStatus('Processing trajectory data...');
+
+const orionData = unpackVectors(ORION_VECTORS);
+const moonData  = unpackVectors(MOON_VECTORS);
+const elemData  = unpackElements(ORION_ELEMENTS);
+
+console.log(`Loaded ${orionData.length} Orion points, ${moonData.length} Moon points, ${elemData.length} element sets`);
+
+// ── Three.js Scene ──
+const container = document.getElementById('canvas-container');
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.001, 100000);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(window.devicePixelRatio);
+container.appendChild(renderer.domElement);
+
+// Controls
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.minDistance = 0.0000001;
+controls.maxDistance = 5000;
+controls.zoomSpeed = 3.0;
+controls.enableSmoothing = true;
+
+// Smooth exponential zoom (replaces OrbitControls' default linear zoom)
+let targetZoomDistance = null;
+renderer.domElement.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const currentDist = camera.position.distanceTo(controls.target);
+  if (targetZoomDistance === null) targetZoomDistance = currentDist;
+  // Exponential: each scroll tick multiplies/divides distance by a factor
+  const factor = e.deltaY > 0 ? 1.15 : 1 / 1.15;
+  targetZoomDistance = Math.max(controls.minDistance, Math.min(controls.maxDistance, targetZoomDistance * factor));
+}, { passive: false });
+
+// Disable OrbitControls' built-in zoom so ours takes over
+controls.enableZoom = false;
+
+// Lighting
+// Sun direction from Earth in early April 2026 (ICRF J2000)
+// RA ≈ 12°, Dec ≈ +5° → unit vector, then converted to Three.js Y-up
+// Sun position from JPL Horizons: RA=15.39°, Dec=+6.56° (mid-mission Apr 6)
+const sunDirICRF = { x: 0.957829, y: 0.263650, z: 0.114244 };
+const sunDir = new THREE.Vector3(sunDirICRF.x, sunDirICRF.z, -sunDirICRF.y).normalize();
+
+scene.add(new THREE.AmbientLight(0x404050, 1.2));
+const sunLight = new THREE.DirectionalLight(0xfff8ee, 3.5);
+sunLight.position.copy(sunDir.clone().multiplyScalar(1000));
+scene.add(sunLight);
+
+// ── Sun (billboard sprite on the skybox) ──
+const sunCanvas = document.createElement('canvas');
+sunCanvas.width = 256;
+sunCanvas.height = 256;
+const ctx = sunCanvas.getContext('2d');
+// Radial gradient: white-hot center → warm yellow → orange edge → transparent
+const grad = ctx.createRadialGradient(128, 128, 0, 128, 128, 128);
+grad.addColorStop(0, 'rgba(255,255,255,1)');
+grad.addColorStop(0.15, 'rgba(255,250,230,1)');
+grad.addColorStop(0.4, 'rgba(255,220,100,0.6)');
+grad.addColorStop(0.7, 'rgba(255,180,50,0.2)');
+grad.addColorStop(1, 'rgba(255,150,30,0)');
+ctx.fillStyle = grad;
+ctx.fillRect(0, 0, 256, 256);
+
+const sunTex = new THREE.CanvasTexture(sunCanvas);
+const sunSpriteMat = new THREE.SpriteMaterial({
+  map: sunTex,
+  color: 0xffffff,
+  transparent: true,
+  blending: THREE.AdditiveBlending,
+  depthWrite: false
+});
+const sunSprite = new THREE.Sprite(sunSpriteMat);
+// Sun placed very far out - won't have visible parallax at Earth-Moon scale
+sunSprite.position.copy(sunDir.clone().multiplyScalar(40000));
+sunSprite.scale.setScalar(4000);
+scene.add(sunSprite);
+
+// ── Texture loader ──
+const texLoader = new THREE.TextureLoader();
+
+// Skybox - equirectangular starfield mapped as 3D environment
+const skyTex = texLoader.load('./assets/starfield.jpg');
+skyTex.mapping = THREE.EquirectangularReflectionMapping;
+skyTex.colorSpace = THREE.SRGBColorSpace;
+scene.background = skyTex;
+scene.add(camera);
+
+// ── Earth ──
+const earthGeo = new THREE.SphereGeometry(EARTH_RADIUS, 64, 64);
+const earthTex = texLoader.load('./assets/earth.jpg');
+earthTex.colorSpace = THREE.SRGBColorSpace;
+const earthMat = new THREE.MeshPhongMaterial({
+  map: earthTex,
+  specular: 0x222222,
+  shininess: 15
+});
+const earthMesh = new THREE.Mesh(earthGeo, earthMat);
+// No axial tilt here - our coordinate frame IS Earth equatorial (ICRF J2000)
+// Earth's rotation axis = ICRF Z = Three.js Y, so rotation is just around Y
+scene.add(earthMesh);
+
+// Earth atmosphere glow
+const atmosGeo = new THREE.SphereGeometry(EARTH_RADIUS * 1.015, 64, 64);
+const atmosMat = new THREE.MeshPhongMaterial({
+  color: 0x4488ff,
+  transparent: true,
+  opacity: 0.08,
+  side: THREE.FrontSide
+});
+scene.add(new THREE.Mesh(atmosGeo, atmosMat));
+
+// ── Moon ──
+const moonGeo = new THREE.SphereGeometry(MOON_RADIUS, 48, 48);
+const moonTex = texLoader.load('./assets/moon.jpg');
+moonTex.colorSpace = THREE.SRGBColorSpace;
+const moonMat = new THREE.MeshPhongMaterial({
+  map: moonTex,
+  specular: 0x111111,
+  shininess: 3
+});
+const moonMesh = new THREE.Mesh(moonGeo, moonMat);
+scene.add(moonMesh);
+
+// ── Orion Spacecraft (NASA GLB model) ──
+const orionMesh = new THREE.Group();
+scene.add(orionMesh);
+
+// Load NASA ESAS Crew Module GLB
+const gltfLoader = new GLTFLoader();
+gltfLoader.load('./assets/orion_full.glb', (gltf) => {
+  const model = gltf.scene;
+  // Center and scale to real physical size
+  // Orion MPCV + ESM is ~26m long. At SCALE=1/1000 (1 unit = 1000km), that's 0.000026 units
+  const box = new THREE.Box3().setFromObject(model);
+  const center = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3());
+  const maxDim = Math.max(size.x, size.y, size.z);
+  const realScale = 0.000026 / maxDim; // 26 meters in scene units
+  model.scale.setScalar(realScale);
+  model.position.sub(center.multiplyScalar(realScale));
+  // PBR material with vertex colors - proper light response
+  model.traverse((child) => {
+    if (child.isMesh) {
+      // Recompute smooth normals in case they're missing or flat
+      child.geometry.computeVertexNormals();
+      child.material = new THREE.MeshStandardMaterial({
+        vertexColors: true,
+        metalness: 0.4,
+        roughness: 0.35,
+        envMapIntensity: 1.0
+      });
+    }
+  });
+  orionMesh.add(model);
+  console.log('NASA Orion model loaded');
+}, undefined, (err) => {
+  console.warn('Could not load Orion GLB, using fallback sphere:', err);
+  const fallback = new THREE.Mesh(
+    new THREE.SphereGeometry(0.000013, 16, 16),
+    new THREE.MeshPhongMaterial({ color: 0xffffff, emissive: 0x444444 })
+  );
+  orionMesh.add(fallback);
+});
+
+
+// ── Velocity vector arrow ──
+const velArrow = new THREE.ArrowHelper(
+  new THREE.Vector3(1, 0, 0), new THREE.Vector3(), 1, 0x00ff88, 0.3, 0.15
+);
+scene.add(velArrow);
+
+// ── Trajectory line (past) ──
+const MAX_TRAIL = orionData.length;
+const trailPositions = new Float32Array(MAX_TRAIL * 3);
+const trailColors = new Float32Array(MAX_TRAIL * 3);
+const trailGeo = new THREE.BufferGeometry();
+trailGeo.setAttribute('position', new THREE.BufferAttribute(trailPositions, 3));
+trailGeo.setAttribute('color', new THREE.BufferAttribute(trailColors, 3));
+const trailMat = new THREE.LineBasicMaterial({ vertexColors: true });
+const trailLine = new THREE.Line(trailGeo, trailMat);
+scene.add(trailLine);
+
+// ── Future trajectory (dashed) ──
+const futurePositions = new Float32Array(MAX_TRAIL * 3);
+const futureGeo = new THREE.BufferGeometry();
+futureGeo.setAttribute('position', new THREE.BufferAttribute(futurePositions, 3));
+const futureMat = new THREE.LineDashedMaterial({ color: 0x335566, dashSize: 1, gapSize: 0.5 });
+const futureLine = new THREE.Line(futureGeo, futureMat);
+scene.add(futureLine);
+
+// ── Moon orbit path ──
+const moonOrbitPositions = new Float32Array(moonData.length * 3);
+for (let i = 0; i < moonData.length; i++) {
+  moonOrbitPositions[i*3]   = moonData[i].x * SCALE;
+  moonOrbitPositions[i*3+1] = moonData[i].z * SCALE; // swap Y/Z for Three.js
+  moonOrbitPositions[i*3+2] = -moonData[i].y * SCALE;
+}
+const moonOrbitGeo = new THREE.BufferGeometry();
+moonOrbitGeo.setAttribute('position', new THREE.BufferAttribute(moonOrbitPositions, 3));
+const moonOrbitMat = new THREE.LineBasicMaterial({ color: 0x444444 });
+scene.add(new THREE.Line(moonOrbitGeo, moonOrbitMat));
+
+// ── Earth-Moon line ──
+const emLineGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+const emLineMat = new THREE.LineDashedMaterial({ color: 0x333344, dashSize: 2, gapSize: 1 });
+const emLine = new THREE.Line(emLineGeo, emLineMat);
+emLine.computeLineDistances();
+scene.add(emLine);
+
+// ── State ──
+let currentIndex = orionData.length - 1;
+let currentFracIdx = orionData.length - 1;
+let focusTarget = 'orion';
+let isPlaying = false;
+let isLive = false;
+let timeWarp = 1; // 1 = real-time, 10 = 10x, etc.
+
+window.setWarp = function(w) {
+  timeWarp = w;
+  document.getElementById('warp-label').textContent = 'TIME WARP: ' + w + 'x';
+  document.querySelectorAll('.warp-btn').forEach(b => b.classList.remove('active'));
+  // Find and highlight the active button
+  document.querySelectorAll('.warp-btn').forEach(b => {
+    if (b.textContent === w + 'x') b.classList.add('active');
+  });
+  // If we're in live mode and warp > 1, switch to playing from current time
+  if (isLive && w > 1) {
+    isLive = false;
+    isPlaying = true;
+    currentFracIdx = jdToFractionalIndex(nowToJD());
+    updateLiveButton();
+    document.getElementById('btn-play').textContent = '⏸ Pause';
+  }
+  if (w === 1 && !isLive && isPlaying) {
+    // Could go back to live if they set 1x
+  }
+};
+
+// Convert current real-world time to Julian Date
+function nowToJD() {
+  const now = Date.now();
+  return (now / 86400000) + 2440587.5; // Unix epoch in JD
+}
+
+// Find the data index closest to a given JD
+function jdToIndex(jd) {
+  if (orionData.length === 0) return 0;
+  if (jd <= orionData[0].jd) return 0;
+  if (jd >= orionData[orionData.length - 1].jd) return orionData.length - 1;
+  let lo = 0, hi = orionData.length - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (orionData[mid].jd <= jd) lo = mid; else hi = mid;
+  }
+  return (jd - orionData[lo].jd < orionData[hi].jd - jd) ? lo : hi;
+}
+
+function getLiveIndex() {
+  return jdToIndex(nowToJD());
+}
+
+function updateLiveButton() {
+  const btn = document.getElementById('btn-live');
+  if (isLive) {
+    btn.style.background = '#411';
+    btn.style.borderColor = '#f44';
+    btn.style.color = '#f44';
+    btn.textContent = '● LIVE';
+  } else {
+    btn.style.background = '#222';
+    btn.style.borderColor = '#555';
+    btn.style.color = '#888';
+    btn.textContent = '○ GO LIVE';
+  }
+}
+
+window.goLive = function() {
+  isLive = true;
+  isPlaying = false;
+  timeWarp = 1;
+  document.getElementById('warp-label').textContent = 'TIME WARP: 1x';
+  document.querySelectorAll('.warp-btn').forEach(b => b.classList.remove('active'));
+  document.querySelector('.warp-btn').classList.add('active'); // first btn = 1x
+  document.getElementById('btn-play').textContent = '▶ Play';
+  currentFracIdx = jdToFractionalIndex(nowToJD());
+  updateScene(currentFracIdx);
+  focusOn('orion');
+  updateLiveButton();
+};
+
+// Helper: get Moon position at a given JD by interpolation
+function getMoonPos(jd) {
+  // Find bracketing indices
+  if (moonData.length === 0) return { x: 0, y: 0, z: 0 };
+  if (jd <= moonData[0].jd) return moonData[0];
+  if (jd >= moonData[moonData.length-1].jd) return moonData[moonData.length-1];
+  let lo = 0, hi = moonData.length - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (moonData[mid].jd <= jd) lo = mid; else hi = mid;
+  }
+  const t = (jd - moonData[lo].jd) / (moonData[hi].jd - moonData[lo].jd);
+  return {
+    x: moonData[lo].x + t * (moonData[hi].x - moonData[lo].x),
+    y: moonData[lo].y + t * (moonData[hi].y - moonData[lo].y),
+    z: moonData[lo].z + t * (moonData[hi].z - moonData[lo].z)
+  };
+}
+
+// Convert Horizons coords (ICRF) to Three.js (Y-up)
+function toScene(pt) {
+  return new THREE.Vector3(pt.x * SCALE, pt.z * SCALE, -pt.y * SCALE);
+}
+
+function getMissionPhase(jd) {
+  // Approximate mission phases based on known timeline
+  const h = (jd - 2461132.583) * 24; // hours since data start
+  if (h < 1.5) return 'Post-Separation / Checkout';
+  if (h < 11) return 'Earth Orbit / Perigee Raise';
+  if (h < 25) return 'Translunar Injection Prep';
+  if (h < 30) return 'Translunar Injection Burn';
+  if (h < 96) return 'Translunar Coast';
+  if (h < 105) return 'Lunar Sphere of Influence';
+  if (h < 115) return 'Closest Lunar Approach';
+  if (h < 130) return 'Powered Flyby / Free Return';
+  if (h < 200) return 'Return Transit';
+  return 'Entry & Splashdown Approach';
+}
+
+function formatNum(n, dec = 1) {
+  return n.toLocaleString('en-US', { minimumFractionDigits: dec, maximumFractionDigits: dec });
+}
+
+// Interpolate between two data points
+function lerpData(a, b, t) {
+  return {
+    jd: a.jd + (b.jd - a.jd) * t,
+    dateStr: a.dateStr, // use the earlier one, we'll format JD separately for live
+    x: a.x + (b.x - a.x) * t,
+    y: a.y + (b.y - a.y) * t,
+    z: a.z + (b.z - a.z) * t,
+    vx: a.vx + (b.vx - a.vx) * t,
+    vy: a.vy + (b.vy - a.vy) * t,
+    vz: a.vz + (b.vz - a.vz) * t,
+    rg: a.rg + (b.rg - a.rg) * t,
+    rr: a.rr + (b.rr - a.rr) * t,
+  };
+}
+
+// Convert JD to a readable date string
+function jdToDateStr(jd) {
+  const millis = (jd - 2440587.5) * 86400000;
+  const d = new Date(millis);
+  return d.toISOString().replace('T', ' ').replace('Z', '').slice(0, 19);
+}
+
+// Get fractional index from JD
+function jdToFractionalIndex(jd) {
+  if (orionData.length === 0) return 0;
+  if (jd <= orionData[0].jd) return 0;
+  if (jd >= orionData[orionData.length - 1].jd) return orionData.length - 1;
+  let lo = 0, hi = orionData.length - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (orionData[mid].jd <= jd) lo = mid; else hi = mid;
+  }
+  const t = (jd - orionData[lo].jd) / (orionData[hi].jd - orionData[lo].jd);
+  return lo + t;
+}
+
+function updateScene(fracIdx) {
+  fracIdx = Math.max(0, Math.min(fracIdx, orionData.length - 1));
+  const idx = Math.floor(fracIdx);
+  const t = fracIdx - idx;
+  currentIndex = idx;
+
+  // Interpolate position between data points
+  const idxNext = Math.min(idx + 1, orionData.length - 1);
+  const pt = (t > 0.001 && idx < orionData.length - 1) ? lerpData(orionData[idx], orionData[idxNext], t) : orionData[idx];
+
+  const moonPos = getMoonPos(pt.jd);
+  const elem = elemData[Math.min(idx, elemData.length - 1)];
+
+  // ── Earth rotation: Greenwich Mean Sidereal Time ──
+  // GMST(JD) = 280.46061837 + 360.98564736629 * (JD - 2451545.0) degrees
+  // This gives the angle of the prime meridian from the vernal equinox (ICRF X-axis)
+  const T_jd = pt.jd - 2451545.0; // days since J2000.0
+  const gmstDeg = (280.46061837 + 360.98564736629 * T_jd) % 360;
+  earthMesh.rotation.y = gmstDeg * Math.PI / 180;
+
+  // Update Moon position
+  const mScene = toScene(moonPos);
+  moonMesh.position.copy(mScene);
+
+  // ── Moon: tidally locked (near side always faces Earth) ──
+  moonMesh.rotation.set(0, 0, 0);
+  moonMesh.lookAt(0, 0, 0); // look at Earth (origin)
+
+  // Update Earth-Moon line
+  const emPositions = emLine.geometry.attributes.position;
+  emPositions.setXYZ(0, 0, 0, 0);
+  emPositions.setXYZ(1, mScene.x, mScene.y, mScene.z);
+  emPositions.needsUpdate = true;
+  emLine.computeLineDistances();
+
+  // Update Orion position
+  const oScene = toScene(pt);
+  orionMesh.position.copy(oScene);
+
+  const camDist = camera.position.distanceTo(orionMesh.position);
+
+  // ── Orion orientation logic ──
+  // Default: nose pointed at the Sun (solar panel charging attitude)
+  // Near Earth during TLI (<400km altitude from surface): nose prograde
+  // Smooth transition over ~5 minutes (300 data points at 1-min resolution)
+  const speed = Math.sqrt(pt.vx**2 + pt.vy**2 + pt.vz**2);
+  const velDir = new THREE.Vector3(pt.vx, pt.vz, -pt.vy).normalize();
+  const EARTH_SURFACE_R = 6371; // km
+  const altitudeKm = pt.rg - EARTH_SURFACE_R;
+  const TLI_THRESHOLD = 400; // km altitude
+  const TRANSITION_RANGE = 200; // km for smooth blend (400-600km)
+
+  // Flip quaternion: model nose is along -Y, so rotate 180 around Z then tilt
+  const flipQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.PI);
+  const tiltQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
+
+  // Compute sun-pointing quaternion with bias offset
+  // Real Orion flies "biased tail-to-Sun" ~15 degrees off the sun line
+  const sunPointMatrix = new THREE.Matrix4();
+  sunPointMatrix.lookAt(new THREE.Vector3(), sunDir.clone(), new THREE.Vector3(0, 1, 0));
+  const sunQuat = new THREE.Quaternion().setFromRotationMatrix(sunPointMatrix);
+  sunQuat.multiply(tiltQuat).multiply(flipQuat);
+
+  // Apply 15-degree bias offset (tilt away from perfect sun-pointing)
+  const biasAxis = new THREE.Vector3(1, 0, 0).applyQuaternion(sunQuat).normalize();
+  const biasQuat = new THREE.Quaternion().setFromAxisAngle(biasAxis, 15 * Math.PI / 180);
+  const biasedSunQuat = biasQuat.multiply(sunQuat);
+
+  // BBQ roll: ~2 revolutions per hour about the spacecraft's own long axis
+  // The long axis (nose-to-tail) after sun-pointing is the Z-axis of the rotated frame
+  const BBQ_REV_PER_HOUR = 2;
+  const hoursSinceEpoch = (pt.jd - orionData[0].jd) * 24;
+  const bbqAngle = hoursSinceEpoch * BBQ_REV_PER_HOUR * Math.PI * 2;
+  // Get the spacecraft's long axis in world space (model Y-axis transformed by current orientation)
+  const craftAxis = new THREE.Vector3(0, 1, 0).applyQuaternion(biasedSunQuat).normalize();
+  const bbqQuat = new THREE.Quaternion().setFromAxisAngle(craftAxis, bbqAngle);
+  const sunBbqQuat = bbqQuat.multiply(biasedSunQuat);
+
+  // Compute prograde quaternion (nose along velocity)
+  const proMatrix = new THREE.Matrix4();
+  proMatrix.lookAt(new THREE.Vector3(), velDir, new THREE.Vector3(0, 1, 0));
+  const proQuat = new THREE.Quaternion().setFromRotationMatrix(proMatrix);
+  proQuat.multiply(tiltQuat).multiply(flipQuat);
+
+  // Blend factor: 0 = sun-pointing with BBQ, 1 = prograde
+  let progradeBlend = 0;
+  if (altitudeKm <= TLI_THRESHOLD) {
+    progradeBlend = 1;
+  } else if (altitudeKm < TLI_THRESHOLD + TRANSITION_RANGE) {
+    const t = (altitudeKm - TLI_THRESHOLD) / TRANSITION_RANGE;
+    progradeBlend = 1 - t * t * (3 - 2 * t); // smoothstep
+  }
+
+  const finalQuat = sunBbqQuat.clone().slerp(proQuat, progradeBlend);
+  orionMesh.quaternion.copy(finalQuat);
+
+  // Velocity arrow direction (length updated every frame in animate loop)
+  velArrow.position.copy(oScene);
+  velArrow.setDirection(velDir);
+
+  // Trail (past trajectory)
+  let trailCount = 0;
+  for (let i = 0; i <= idx; i++) {
+    const p = orionData[i];
+    const s = toScene(p);
+    trailPositions[trailCount*3]   = s.x;
+    trailPositions[trailCount*3+1] = s.y;
+    trailPositions[trailCount*3+2] = s.z;
+    // Color: fade from dim to bright
+    const t = idx > 0 ? i / idx : 1;
+    trailColors[trailCount*3]   = 0.1 + t * 0.3;
+    trailColors[trailCount*3+1] = 0.2 + t * 0.6;
+    trailColors[trailCount*3+2] = 0.3 + t * 0.7;
+    trailCount++;
+  }
+  trailGeo.setDrawRange(0, trailCount);
+  trailGeo.attributes.position.needsUpdate = true;
+  trailGeo.attributes.color.needsUpdate = true;
+
+  // Future trajectory (dashed)
+  let futureCount = 0;
+  for (let i = idx; i < orionData.length; i++) {
+    const p = orionData[i];
+    const s = toScene(p);
+    futurePositions[futureCount*3]   = s.x;
+    futurePositions[futureCount*3+1] = s.y;
+    futurePositions[futureCount*3+2] = s.z;
+    futureCount++;
+  }
+  futureGeo.setDrawRange(0, futureCount);
+  futureGeo.attributes.position.needsUpdate = true;
+  futureLine.computeLineDistances();
+
+  // ── Computed values ──
+  const EARTH_R = 6371;
+  const MOON_R = 1737;
+  const dx = pt.x - moonPos.x, dy = pt.y - moonPos.y, dz = pt.z - moonPos.z;
+  const distMoon = Math.sqrt(dx*dx + dy*dy + dz*dz);
+  const altEarth = pt.rg - EARTH_R;
+  const altMoon = distMoon - MOON_R;
+
+  // Radial vs horizontal velocity
+  const radialV = pt.rr; // range-rate = radial component
+  const horizV = Math.sqrt(Math.max(0, speed*speed - radialV*radialV));
+
+  // Acceleration & G-force (numerical derivative of velocity)
+  let accelMs2 = 0;
+  if (idx > 0 && idx < orionData.length - 1) {
+    const prev = orionData[Math.max(0, idx - 1)];
+    const next = orionData[Math.min(orionData.length - 1, idx + 1)];
+    const dt_sec = (next.jd - prev.jd) * 86400;
+    if (dt_sec > 0) {
+      const dvx = next.vx - prev.vx, dvy = next.vy - prev.vy, dvz = next.vz - prev.vz;
+      accelMs2 = Math.sqrt(dvx*dvx + dvy*dvy + dvz*dvz) / dt_sec * 1000; // km/s² → m/s²
+    }
+  }
+  const gForce = accelMs2 / 9.80665;
+
+  // Mission Elapsed Time
+  const LAUNCH_JD = 2461132.416; // approx launch JD (Apr 1, 2026 ~22:00 UTC)
+  const metSec = Math.max(0, (pt.jd - LAUNCH_JD) * 86400);
+  const metD = Math.floor(metSec / 86400);
+  const metH = Math.floor((metSec % 86400) / 3600);
+  const metM = Math.floor((metSec % 3600) / 60);
+  const metS = Math.floor(metSec % 60);
+  const metStr = `T+${metD}d ${String(metH).padStart(2,'0')}:${String(metM).padStart(2,'0')}:${String(metS).padStart(2,'0')}`;
+
+  // ── HUD ──
+  document.getElementById('phase').textContent = getMissionPhase(pt.jd);
+  document.getElementById('met').textContent = metStr;
+
+  // Distance
+  document.getElementById('dist-earth').textContent = formatNum(pt.rg) + ' km';
+  document.getElementById('alt-earth').textContent = formatNum(altEarth) + ' km  (' + formatNum(altEarth / 1.609) + ' mi)';
+  document.getElementById('dist-moon').textContent = formatNum(distMoon) + ' km';
+  document.getElementById('alt-moon').textContent = formatNum(altMoon) + ' km  (' + formatNum(altMoon / 1.609) + ' mi)';
+
+  // Velocity
+  document.getElementById('speed').textContent = `${formatNum(speed, 3)} km/s  (${formatNum(speed * 3600, 1)} km/h)`;
+  document.getElementById('radial-v').textContent = `${radialV >= 0 ? '+' : ''}${formatNum(radialV, 3)} km/s  ${radialV > 0 ? '↑ away' : '↓ toward'}`;
+  document.getElementById('horiz-v').textContent = formatNum(horizV, 3) + ' km/s';
+
+  // Flight path angle: angle between velocity vector and local horizontal
+  // sin(FPA) = radial_velocity / speed  (negative = descending)
+  const fpa = (speed > 0.001) ? Math.asin(Math.max(-1, Math.min(1, radialV / speed))) * (180 / Math.PI) : 0;
+  document.getElementById('fpa').textContent = formatNum(fpa, 2) + '°' + (fpa < -0.1 ? ' (descending)' : fpa > 0.1 ? ' (ascending)' : ' (level)');
+  document.getElementById('accel').textContent = formatNum(accelMs2, 4) + ' m/s²';
+  document.getElementById('gforce').textContent = formatNum(gForce, 4) + ' G';
+
+  // Orbital Elements
+  if (elem) {
+    const periAlt = elem.qr - EARTH_R;
+    const isHyper = elem.ec >= 1 || elem.ad > 1e10;
+    document.getElementById('el-sma').textContent = isHyper ? formatNum(elem.a) + ' km (hyp)' : formatNum(elem.a) + ' km';
+    document.getElementById('el-ecc').textContent = formatNum(elem.ec, 6);
+    document.getElementById('el-inc').textContent = formatNum(elem.inc, 4) + '°';
+    document.getElementById('el-raan').textContent = formatNum(elem.om, 4) + '°';
+    document.getElementById('el-argp').textContent = formatNum(elem.w, 4) + '°';
+    document.getElementById('el-ta').textContent = formatNum(elem.ta, 4) + '°';
+    document.getElementById('el-peri').textContent = formatNum(periAlt) + ' km';
+    document.getElementById('el-apo').textContent = isHyper ? '∞ (hyperbolic)' : formatNum(elem.ad - EARTH_R) + ' km';
+    const periodMin = elem.pr / 60;
+    const periodHr = periodMin / 60;
+    document.getElementById('el-period').textContent = isHyper ? 'N/A (hyperbolic)' :
+      (periodHr > 24 ? formatNum(periodHr / 24) + ' days' : formatNum(periodHr) + ' hr');
+  }
+
+  // Position / Velocity vectors
+  document.getElementById('pos-x').textContent = formatNum(pt.x, 1) + ' km';
+  document.getElementById('pos-y').textContent = formatNum(pt.y, 1) + ' km';
+  document.getElementById('pos-z').textContent = formatNum(pt.z, 1) + ' km';
+  document.getElementById('vel-x').textContent = formatNum(pt.vx, 4) + ' km/s';
+  document.getElementById('vel-y').textContent = formatNum(pt.vy, 4) + ' km/s';
+  document.getElementById('vel-z').textContent = formatNum(pt.vz, 4) + ' km/s';
+
+  document.getElementById('time-label').textContent = jdToDateStr(pt.jd) + ' UTC' + (isLive ? '' : (timeWarp > 1 ? '  [' + timeWarp + 'x]' : ''));
+
+  // Slider
+  document.getElementById('time-slider').value = Math.round((fracIdx / (orionData.length - 1)) * 10000);
+}
+
+// ── Camera Focus ──
+window.focusOn = function(target) {
+  focusTarget = target;
+  document.querySelectorAll('#controls button').forEach(b => b.classList.remove('active'));
+  const btn = document.getElementById(`btn-${target}`);
+  if (btn) btn.classList.add('active');
+
+  const pt = orionData[currentIndex];
+  const moonPos = getMoonPos(pt.jd);
+
+  // Only set distance when switching targets (not every frame)
+  let lookAt;
+  switch (target) {
+    case 'earth':
+      lookAt = new THREE.Vector3(0, 0, 0);
+      targetZoomDistance = 50;
+      break;
+    case 'moon':
+      lookAt = toScene(moonPos);
+      targetZoomDistance = 30;
+      break;
+    case 'orion':
+      lookAt = toScene(pt);
+      targetZoomDistance = 0.0003; // close enough to see the spacecraft
+      break;
+    case 'overview':
+      lookAt = toScene(moonPos).multiplyScalar(0.5);
+      targetZoomDistance = 500;
+      break;
+  }
+  controls.target.copy(lookAt);
+  const dir = camera.position.clone().sub(controls.target);
+  if (dir.length() < 0.0001) dir.set(0.5, 0.3, 1); // fallback if on top of target
+  dir.normalize();
+  camera.position.copy(lookAt).addScaledVector(dir, targetZoomDistance);
+};
+
+// ── Playback ──
+window.togglePlayback = function() {
+  isPlaying = !isPlaying;
+  isLive = false;
+  updateLiveButton();
+  const btn = document.getElementById('btn-play');
+  btn.textContent = isPlaying ? '⏸ Pause' : '▶ Play';
+  if (isPlaying && currentFracIdx >= orionData.length - 1) {
+    currentFracIdx = 0;
+  }
+};
+
+// ── Slider ──
+document.getElementById('time-slider').addEventListener('input', (e) => {
+  const pct = parseInt(e.target.value) / 10000;
+  currentFracIdx = pct * (orionData.length - 1);
+  isLive = false;
+  isPlaying = true; // start playing from scrub position at current warp
+  document.getElementById('btn-play').textContent = '⏸ Pause';
+  updateLiveButton();
+  updateScene(currentFracIdx);
+});
+
+// ── Animation loop ──
+const clock = new THREE.Clock();
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = clock.getDelta();
+
+  // Live mode: interpolate to exact current time every frame
+  if (isLive) {
+    currentFracIdx = jdToFractionalIndex(nowToJD());
+    updateScene(currentFracIdx);
+  }
+
+  if (isPlaying && !isLive) {
+    // Advance by real seconds * timeWarp, converted to data indices
+    // Each data index = 1 minute, so 1 real second at 1x = 1/60th of an index
+    currentFracIdx += dt * timeWarp / 60;
+    if (currentFracIdx >= orionData.length - 1) {
+      currentFracIdx = orionData.length - 1;
+      isPlaying = false;
+      document.getElementById('btn-play').textContent = '▶ Play Mission';
+    }
+    updateScene(currentFracIdx);
+  }
+
+  // Camera follow: move camera AND target together so zoom level is maintained
+  let followTarget = null;
+  if (focusTarget === 'orion') followTarget = orionMesh.position;
+  else if (focusTarget === 'moon') followTarget = moonMesh.position;
+
+  // Scale velocity arrow every frame based on current camera distance
+  const arrowCamDist = camera.position.distanceTo(velArrow.position);
+  const arrowLen = Math.max(0.000005, arrowCamDist * 0.12);
+  velArrow.setLength(arrowLen, arrowLen * 0.2, arrowLen * 0.1);
+
+  if (followTarget) {
+    const offset = camera.position.clone().sub(controls.target);
+    controls.target.copy(followTarget);
+    camera.position.copy(controls.target).add(offset);
+  }
+
+  // Smooth exponential zoom interpolation
+  if (targetZoomDistance !== null) {
+    const currentDist = camera.position.distanceTo(controls.target);
+    const ratio = targetZoomDistance / currentDist;
+    if (Math.abs(ratio - 1) > 0.001) {
+      const lerpRatio = 1 - Math.pow(1 - 0.15, 60 * dt); // frame-rate independent smoothing
+      const newDist = currentDist * (1 + (ratio - 1) * lerpRatio);
+      const dir = camera.position.clone().sub(controls.target).normalize();
+      camera.position.copy(controls.target).addScaledVector(dir, newDist);
+    } else {
+      targetZoomDistance = null;
+    }
+  }
+
+  // Dynamic near/far plane based on camera distance to target
+  const distToTarget = camera.position.distanceTo(controls.target);
+  camera.near = Math.max(0.0000001, distToTarget * 0.0001);
+  camera.far = Math.max(100000, distToTarget * 10000);
+  camera.updateProjectionMatrix();
+
+  controls.update();
+  renderer.render(scene, camera);
+}
+
+// ── Resize ──
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// ── Init ──
+document.getElementById('loading').style.display = 'none';
+
+// Start in live mode - jump to current real-world time, focused on Orion up close
+isLive = true;
+updateLiveButton();
+document.querySelector('.warp-btn').classList.add('active');
+currentFracIdx = jdToFractionalIndex(nowToJD());
+updateScene(currentFracIdx);
+focusOn('orion');
+
+animate();
+
+// ── NASA TV Audio (HLS) ──
+let nasaTVActive = false;
+let nasaTVVideo = null;
+let hlsInstance = null;
+
+let nasaTVRetryTimer = null;
+
+const NASA_STREAMS = [
+  { name: 'NASA Media', url: 'https://ntv2.akamaized.net/hls/live/2013923/NASA-NTV2-HLS/master.m3u8' },
+  { name: 'NASA Public', url: 'https://ntv1.akamaized.net/hls/live/2014075/NASA-NTV1-HLS/master.m3u8' },
+  { name: 'NASA Media (mirror)', url: 'https://endpnt.com/hls/nasa-media/playlist.m3u8' },
+  { name: 'NASA Public (mirror)', url: 'https://endpnt.com/hls/nasa-pub/playlist.m3u8' },
+];
+let nasaStreamIdx = 0;
+
+function tryNasaTV() {
+  const btn = document.getElementById('btn-nasatv');
+  const stream = NASA_STREAMS[nasaStreamIdx % NASA_STREAMS.length];
+  const src = stream.url;
+  console.log('Trying:', stream.name, src);
+
+  // Clean up previous attempt
+  if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
+  if (nasaTVVideo) { nasaTVVideo.pause(); nasaTVVideo.remove(); nasaTVVideo = null; }
+
+  nasaTVVideo = document.createElement('video');
+  nasaTVVideo.style.display = 'none';
+  nasaTVVideo.volume = document.getElementById('vol-slider').value / 100;
+  document.body.appendChild(nasaTVVideo);
+
+  if (window.Hls && Hls.isSupported()) {
+    hlsInstance = new Hls();
+    hlsInstance.loadSource(src);
+    hlsInstance.attachMedia(nasaTVVideo);
+    hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
+      nasaTVVideo.play();
+      btn.textContent = stream.name + ': LIVE';
+      btn.style.borderColor = '#4f4';
+      if (nasaTVRetryTimer) { clearInterval(nasaTVRetryTimer); nasaTVRetryTimer = null; }
+    });
+    hlsInstance.on(Hls.Events.ERROR, (e, data) => {
+      if (data.fatal) {
+        console.warn(stream.name + ' unavailable, trying next...');
+        hlsInstance.destroy(); hlsInstance = null;
+        if (nasaTVVideo) { nasaTVVideo.pause(); nasaTVVideo.remove(); nasaTVVideo = null; }
+        nasaStreamIdx++;
+        // If we've tried all streams, wait 30s and cycle again
+        if (nasaStreamIdx % NASA_STREAMS.length === 0) {
+          btn.textContent = 'Mission Audio: OFFLINE (retrying...)';
+          btn.style.borderColor = '#a44';
+          if (!nasaTVRetryTimer) {
+            nasaTVRetryTimer = setInterval(() => {
+              if (nasaTVActive) tryNasaTV();
+            }, 30000);
+          }
+        } else {
+          btn.textContent = 'Trying ' + NASA_STREAMS[nasaStreamIdx % NASA_STREAMS.length].name + '...';
+          btn.style.borderColor = '#aa4';
+          setTimeout(() => { if (nasaTVActive) tryNasaTV(); }, 1000);
+        }
+      }
+    });
+  } else if (nasaTVVideo.canPlayType('application/vnd.apple.mpegurl')) {
+    nasaTVVideo.src = src;
+    nasaTVVideo.play().then(() => {
+      btn.textContent = 'NASA TV Audio: LIVE';
+      btn.style.borderColor = '#4f4';
+    }).catch(() => {
+      btn.textContent = 'NASA TV: OFFLINE (retrying...)';
+      btn.style.borderColor = '#a44';
+      if (!nasaTVRetryTimer) {
+        nasaTVRetryTimer = setInterval(() => {
+          if (nasaTVActive) tryNasaTV();
+        }, 30000);
+      }
+    });
+  }
+}
+
+window.toggleNasaTV = function() {
+  const btn = document.getElementById('btn-nasatv');
+  const volRow = document.getElementById('volume-row');
+
+  if (!nasaTVActive) {
+    nasaTVActive = true;
+    btn.classList.add('active');
+    volRow.style.display = 'block';
+    tryNasaTV();
+  } else {
+    nasaTVActive = false;
+    if (nasaTVRetryTimer) { clearInterval(nasaTVRetryTimer); nasaTVRetryTimer = null; }
+    if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
+    if (nasaTVVideo) { nasaTVVideo.pause(); nasaTVVideo.remove(); nasaTVVideo = null; }
+    btn.textContent = 'Mission Audio: OFF';
+    nasaStreamIdx = 0;
+    btn.classList.remove('active');
+    btn.style.borderColor = '';
+    volRow.style.display = 'none';
+  }
+};
+
+document.getElementById('vol-slider').addEventListener('input', (e) => {
+  if (nasaTVVideo) nasaTVVideo.volume = e.target.value / 100;
+});
+</script>
+</body>
+</html>
