@@ -21,7 +21,7 @@
   #hud .section-title { color: #6cf; font-size: 16px; text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 8px; }
   #hud .row { display: flex; justify-content: space-between; align-items: baseline; margin: 4px 0; }
   #hud .lbl { color: #778; font-size: 16px; white-space: nowrap; flex-shrink: 0; }
-  #hud .val { color: #ddd; font-size: 17px; text-align: right; font-variant-numeric: tabular-nums; }
+  #hud .val { color: #ddd; font-size: 17px; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
   #hud .val.big { color: #6f6; font-size: 22px; font-weight: bold; }
   #hud .val.med { color: #fff; font-size: 19px; }
   #hud .val.sm { color: #777; font-size: 14px; }
@@ -169,9 +169,42 @@
   <button id="btn-play" onclick="togglePlayback()">▶ Play</button>
   <div style="border-top:1px solid #334; margin:6px 0;"></div>
   <button id="btn-nasatv" onclick="toggleNasaTV()">Mission Audio: OFF</button>
+  <button onclick="document.getElementById('debug-panel').style.display='block'">Debug Panels</button>
   <div id="volume-row" style="display:none; margin-top:4px;">
     <input type="range" id="vol-slider" min="0" max="100" value="50" style="width:100%;">
   </div>
+</div>
+
+<div id="debug-panel" style="position:absolute; top:20px; right:240px; background:rgba(0,0,0,0.9); border:1px solid #553; border-radius:8px; padding:12px 16px; pointer-events:auto; font-size:12px; color:#ccc; width:300px; display:none; max-height:calc(100vh - 100px); overflow-y:auto;">
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+    <span style="color:#ff6; font-size:14px; font-weight:bold;">DEBUG: Panel Editor</span>
+    <button onclick="document.getElementById('debug-panel').style.display='none'" style="background:none;border:none;color:#888;cursor:pointer;font-size:16px;">X</button>
+  </div>
+  <div style="margin-bottom:6px;">
+    <select id="dbg-panel-select" style="width:100%; padding:4px; background:#222; color:#ff6; border:1px solid #555; font-family:inherit;">
+      <option value="all">All Panels</option>
+    </select>
+  </div>
+  <div style="margin-bottom:2px;">X (along long axis)</div>
+  <input type="range" id="dbg-x" min="-10" max="10" step="0.05" value="0" style="width:100%;">
+  <div id="dbg-x-val" style="text-align:right; color:#ff6;">0</div>
+  <div style="margin-bottom:2px;">Y</div>
+  <input type="range" id="dbg-y" min="-10" max="10" step="0.05" value="0" style="width:100%;">
+  <div id="dbg-y-val" style="text-align:right; color:#ff6;">0</div>
+  <div style="margin-bottom:2px;">Z</div>
+  <input type="range" id="dbg-z" min="-10" max="10" step="0.05" value="0" style="width:100%;">
+  <div id="dbg-z-val" style="text-align:right; color:#ff6;">0</div>
+  <div style="margin-bottom:2px;">Rot X (deg)</div>
+  <input type="range" id="dbg-rx" min="-180" max="180" step="1" value="0" style="width:100%;">
+  <div id="dbg-rx-val" style="text-align:right; color:#ff6;">0</div>
+  <div style="margin-bottom:2px;">Rot Y (deg)</div>
+  <input type="range" id="dbg-ry" min="-180" max="180" step="1" value="0" style="width:100%;">
+  <div id="dbg-ry-val" style="text-align:right; color:#ff6;">0</div>
+  <div style="margin-bottom:2px;">Rot Z (deg)</div>
+  <input type="range" id="dbg-rz" min="-180" max="180" step="1" value="0" style="width:100%;">
+  <div id="dbg-rz-val" style="text-align:right; color:#ff6;">0</div>
+  <div id="dbg-status" style="color:#888; margin-top:6px; font-size:11px; border-top:1px solid #333; padding-top:6px;"></div>
+  <button onclick="dumpAllPanels()" style="width:100%; margin-top:4px; padding:4px; background:#335; border:1px solid #558; border-radius:4px; color:#8cf; cursor:pointer; font-family:inherit; font-size:11px;">Print all values to console</button>
 </div>
 
 <div id="time-slider-container">
@@ -379,20 +412,15 @@ gltfLoader.load('./assets/orion_full.glb', (gltf) => {
   const center = box.getCenter(new THREE.Vector3());
   const size = box.getSize(new THREE.Vector3());
   const maxDim = Math.max(size.x, size.y, size.z);
-  const realScale = 0.000026 / maxDim; // 26 meters in scene units
+  window.realScale = 0.000026 / maxDim; // 26 meters in scene units
+  const realScale = window.realScale;
   model.scale.setScalar(realScale);
   model.position.sub(center.multiplyScalar(realScale));
-  // PBR material with vertex colors - proper light response
+  // Use the embedded GLTF materials (UV-mapped textures from NASA's model)
+  // Only recompute normals for smoother shading
   model.traverse((child) => {
     if (child.isMesh) {
-      // Recompute smooth normals in case they're missing or flat
       child.geometry.computeVertexNormals();
-      child.material = new THREE.MeshStandardMaterial({
-        vertexColors: true,
-        metalness: 0.4,
-        roughness: 0.35,
-        envMapIntensity: 1.0
-      });
     }
   });
   orionMesh.add(model);
@@ -1206,6 +1234,171 @@ window.toggleNasaTV = function() {
 document.getElementById('vol-slider').addEventListener('input', (e) => {
   if (nasaTVVideo) nasaTVVideo.volume = e.target.value / 100;
 });
+
+// ── Debug panel editor ──
+const dbgPanels = []; // populated after model loads
+const dbgValues = {}; // per-panel overrides: { panelIdx: {x,y,z,rx,ry,rz} }
+
+// Populate panel list after model loads
+function initDebugPanels() {
+  const select = document.getElementById('dbg-panel-select');
+  let idx = 0;
+  orionMesh.traverse((child) => {
+    if (child.isMesh && child.geometry) {
+      const vCount = child.geometry.attributes.position.count;
+      if (vCount > 2000 && vCount < 3000) {
+        child.userData.panelIdx = idx;
+        child.userData.origPos = child.position.clone();
+        child.userData.origQuat = child.quaternion.clone();
+        dbgPanels.push(child);
+        dbgValues[idx] = { x:0, y:0, z:0, rx:0, ry:0, rz:0 };
+        const opt = document.createElement('option');
+        opt.value = idx;
+        opt.textContent = 'Panel ' + (idx + 1) + ' (' + vCount + ' verts)';
+        select.appendChild(opt);
+        idx++;
+      }
+    }
+  });
+  console.log('Found ' + idx + ' solar panels for debug');
+}
+
+// When panel selection changes, load its current values into sliders
+document.getElementById('dbg-panel-select').addEventListener('change', () => {
+  const sel = document.getElementById('dbg-panel-select').value;
+  if (sel === 'all') {
+    ['x','y','z','rx','ry','rz'].forEach(k => {
+      document.getElementById('dbg-' + k).value = 0;
+      document.getElementById('dbg-' + k + '-val').textContent = '0';
+    });
+  } else {
+    const v = dbgValues[parseInt(sel)];
+    ['x','y','z','rx','ry','rz'].forEach(k => {
+      document.getElementById('dbg-' + k).value = v[k];
+      document.getElementById('dbg-' + k + '-val').textContent = v[k];
+    });
+  }
+});
+
+function applyDebugPanelsFromSliders() {
+  const sel = document.getElementById('dbg-panel-select').value;
+  const vals = {
+    x: parseFloat(document.getElementById('dbg-x').value),
+    y: parseFloat(document.getElementById('dbg-y').value),
+    z: parseFloat(document.getElementById('dbg-z').value),
+    rx: parseFloat(document.getElementById('dbg-rx').value),
+    ry: parseFloat(document.getElementById('dbg-ry').value),
+    rz: parseFloat(document.getElementById('dbg-rz').value),
+  };
+
+  if (sel === 'all') {
+    for (let i = 0; i < dbgPanels.length; i++) {
+      dbgValues[i] = { ...vals };
+    }
+  } else {
+    dbgValues[parseInt(sel)] = { ...vals };
+  }
+  applyDebugPanels();
+}
+
+function applyDebugPanels() {
+  // Apply to each panel using dbgValues directly (not sliders)
+  dbgPanels.forEach((child, idx) => {
+    const v = dbgValues[idx];
+    child.position.copy(child.userData.origPos);
+    child.quaternion.copy(child.userData.origQuat);
+
+    // Position offsets
+    child.position.x += v.x;
+    child.position.y += v.y;
+    child.position.z += v.z;
+
+    // Compute center from actual vertex positions
+    if (!child.userData.geoCenter) {
+      const posAttr = child.geometry.attributes.position;
+      const avg = new THREE.Vector3();
+      for (let i = 0; i < posAttr.count; i++) {
+        avg.x += posAttr.getX(i);
+        avg.y += posAttr.getY(i);
+        avg.z += posAttr.getZ(i);
+      }
+      avg.divideScalar(posAttr.count);
+      child.userData.geoCenter = avg;
+    }
+
+    // Center the geometry, rotate, then un-center
+    const gc = child.userData.geoCenter.clone();
+    const q = new THREE.Quaternion().setFromEuler(
+      new THREE.Euler(v.rx * Math.PI/180, v.ry * Math.PI/180, v.rz * Math.PI/180, 'XYZ')
+    );
+
+    // Offset position so rotation happens around geo center
+    const offset = gc.clone().applyQuaternion(child.quaternion);
+    const newOffset = gc.clone().applyQuaternion(q.clone().multiply(child.quaternion));
+    child.position.add(offset).sub(newOffset);
+    child.quaternion.premultiply(q);
+  });
+
+  document.getElementById('dbg-status').textContent = sel === 'all'
+    ? 'All panels: X=' + vals.x + ' Y=' + vals.y + ' Z=' + vals.z
+    : 'Panel ' + (parseInt(sel)+1) + ': X=' + vals.x + ' Y=' + vals.y + ' Z=' + vals.z;
+}
+
+window.dumpAllPanels = function() {
+  console.log('=== PANEL DEBUG VALUES ===');
+  dbgPanels.forEach((child, idx) => {
+    const v = dbgValues[idx];
+    console.log('Panel ' + (idx+1) + ':', JSON.stringify(v));
+    console.log('  Final pos:', child.position.x, child.position.y, child.position.z);
+  });
+  console.log('Copy these to bake into the model.');
+};
+
+// Auto-apply on any slider change
+['dbg-x', 'dbg-y', 'dbg-z', 'dbg-rx', 'dbg-ry', 'dbg-rz'].forEach(id => {
+  document.getElementById(id).addEventListener('input', (e) => {
+    document.getElementById(id + '-val').textContent = e.target.value;
+    applyDebugPanelsFromSliders();
+  });
+});
+
+// Wait for model to actually load, then init debug and apply saved positions
+const savedPanelPositions = [
+  {x:2.1,  y:0.7,   z:-1.75, rx:33,  ry:-98,  rz:17},
+  {x:1.75, y:2.0,   z:-0.25, rx:-14, ry:-20,  rz:-92},
+  {x:2.25, y:-0.7,  z:1.9,   rx:29,  ry:108,  rz:-7},
+  {x:1.7,  y:-1.75, z:0.3,   rx:-16, ry:10,   rz:95},
+];
+
+let panelsInitialized = false;
+function tryInitPanels() {
+  if (panelsInitialized) return;
+  let meshCount = 0;
+  orionMesh.traverse((child) => {
+    if (child.isMesh) meshCount++;
+  });
+  if (meshCount > 0 && dbgPanels.length === 0) {
+    initDebugPanels();
+  }
+  if (dbgPanels.length > 0) {
+    panelsInitialized = true;
+    savedPanelPositions.forEach((v, i) => { if (i < dbgPanels.length) dbgValues[i] = {...v}; });
+    applyDebugPanels();
+    // Set the dropdown to Panel 1 and load its slider values
+    document.getElementById('dbg-panel-select').value = '0';
+    const v = dbgValues[0];
+    document.getElementById('dbg-x').value = v.x; document.getElementById('dbg-x-val').textContent = v.x;
+    document.getElementById('dbg-y').value = v.y; document.getElementById('dbg-y-val').textContent = v.y;
+    document.getElementById('dbg-z').value = v.z; document.getElementById('dbg-z-val').textContent = v.z;
+    document.getElementById('dbg-rx').value = v.rx; document.getElementById('dbg-rx-val').textContent = v.rx;
+    document.getElementById('dbg-ry').value = v.ry; document.getElementById('dbg-ry-val').textContent = v.ry;
+    document.getElementById('dbg-rz').value = v.rz; document.getElementById('dbg-rz-val').textContent = v.rz;
+    console.log('Applied saved panel positions to ' + dbgPanels.length + ' panels');
+  } else {
+    setTimeout(tryInitPanels, 500);
+  }
+}
+setTimeout(tryInitPanels, 500);
 </script>
 </body>
 </html>
