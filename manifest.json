@@ -1,0 +1,22 @@
+{
+  "name": "Artemis II Live Tracker",
+  "short_name": "Artemis II",
+  "description": "Real-time 3D tracker for NASA's Artemis II mission to the Moon",
+  "start_url": "./index.html",
+  "display": "fullscreen",
+  "orientation": "any",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "icons": [
+    {
+      "src": "assets/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "assets/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

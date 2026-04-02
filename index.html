@@ -2,7 +2,14 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#000000">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" sizes="192x192" href="assets/icon-192.png">
+<link rel="apple-touch-icon" href="assets/icon-192.png">
 <title>Artemis II Live Tracker</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -74,6 +81,71 @@
   }
   .loading-overlay h2 { color: #6cf; margin-bottom: 10px; }
   .loading-overlay p { color: #889; font-size: 14px; }
+
+  /* ── Mobile toggle button ── */
+  #mobile-hud-toggle {
+    display: none; position: absolute; top: 10px; left: 10px; z-index: 100;
+    background: rgba(0,0,0,0.85); border: 1px solid #6cf; border-radius: 6px;
+    color: #6cf; font-family: inherit; font-size: 13px; padding: 8px 14px;
+    cursor: pointer;
+  }
+
+  /* ── Mobile responsive ── */
+  @media (max-width: 768px) {
+    #mobile-hud-toggle { display: block; }
+
+    #hud {
+      position: fixed; top: 0; left: 0; right: 0; bottom: 60px;
+      width: 100%; max-height: none; border-radius: 0;
+      padding: 50px 16px 16px; font-size: 13px; z-index: 90;
+      transform: translateX(-100%); transition: transform 0.3s ease;
+      overflow-y: auto; -webkit-overflow-scrolling: touch;
+    }
+    #hud.mobile-open { transform: translateX(0); }
+    #hud h1 { font-size: 17px; margin-bottom: 8px; }
+    #hud .section-title { font-size: 13px; }
+    #hud .lbl { font-size: 12px; }
+    #hud .val { font-size: 13px; }
+    #hud .val.big { font-size: 17px; }
+    #hud .val.med { font-size: 15px; }
+    #hud .val.sm { font-size: 11px; }
+    #hud .val.evt { font-size: 12px; }
+    #hud .val.evt-time { font-size: 14px; }
+    #hud .cols .lbl { font-size: 11px; }
+    #hud .cols .val { font-size: 12px; }
+
+    #controls {
+      position: fixed; top: 10px; right: 10px; z-index: 50;
+      padding: 8px 10px; border-radius: 6px;
+    }
+    #controls button { font-size: 11px; padding: 5px 8px; }
+
+    #time-slider-container {
+      position: fixed; bottom: 0; left: 0; right: 0;
+      width: 100%; transform: none; border-radius: 8px 8px 0 0;
+      padding: 8px 12px; z-index: 50;
+    }
+    #time-label { font-size: 10px; }
+    .warp-btn { font-size: 10px; padding: 3px 6px; }
+    #warp-label { font-size: 10px; }
+
+    #status-bar {
+      bottom: 68px; font-size: 10px; padding: 6px 12px;
+    }
+
+    #debug-panel { display: none !important; }
+  }
+
+  @media (max-width: 480px) {
+    #controls {
+      top: auto; bottom: 72px; right: 10px; left: auto;
+      display: flex; flex-wrap: wrap; gap: 4px;
+      max-width: calc(100vw - 20px); padding: 6px 8px;
+    }
+    #controls button { display: inline-block; width: auto; margin: 0; font-size: 10px; padding: 4px 7px; }
+    #controls div[style*="border-top"] { display: none; }
+    #volume-row { width: 100%; }
+  }
 </style>
 </head>
 <body>
@@ -82,6 +154,8 @@
   <h2>ARTEMIS II TRACKER</h2>
   <p id="load-status">Loading trajectory data...</p>
 </div>
+
+<button id="mobile-hud-toggle" onclick="document.getElementById('hud').classList.toggle('mobile-open'); this.textContent = document.getElementById('hud').classList.contains('mobile-open') ? 'X  Close' : 'Telemetry'">Telemetry</button>
 
 <div id="canvas-container"></div>
 
@@ -224,7 +298,7 @@
 </div>
 
 <div id="status-bar">
-  <span class="live">● LIVE</span> &nbsp; Data: JPL Horizons (ssd.jpl.nasa.gov) &nbsp;|&nbsp; Spacecraft ID: -1024 &nbsp;|&nbsp; Scroll to zoom, drag to rotate
+  <span class="live">● LIVE</span> &nbsp; Data: JPL Horizons (ssd.jpl.nasa.gov) &nbsp;|&nbsp; Spacecraft ID: -1024 &nbsp;|&nbsp; <span id="interaction-hint">Scroll to zoom, drag to rotate</span>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
@@ -1399,6 +1473,15 @@ function tryInitPanels() {
   }
 }
 setTimeout(tryInitPanels, 500);
+</script>
+<script>
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('./sw.js').catch(() => {});
+}
+if ('ontouchstart' in window) {
+  const hint = document.getElementById('interaction-hint');
+  if (hint) hint.textContent = 'Pinch to zoom, drag to rotate';
+}
 </script>
 </body>
 </html>
