@@ -9,7 +9,7 @@ import urllib.parse
 
 HORIZONS_API = 'https://ssd.jpl.nasa.gov/api/horizons.api'
 MISSION_START = '2026-04-02 02:00'
-MISSION_END = '2026-04-10 23:59'
+MISSION_END = '2026-04-10 23:50'
 STEP_SIZE = '1m'
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data')
 
